@@ -1,0 +1,30 @@
+# MCP System Dependencies
+# Core MCP functionality
+mcp>=1.12.0
+anyio>=4.5.0
+
+# AI/ML dependencies
+groq>=0.4.0
+langchain-community>=0.0.20
+transformers>=4.35.0
+torch>=2.0.0
+sentence-transformers>=2.2.0
+
+# Document processing
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+
+# Web scraping and processing
+yt-dlp>=2023.10.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+
+# Vector database
+faiss-cpu>=1.7.4
+
+# Optional: GPU support for FAISS
+# faiss-gpu>=1.7.4
+
+# Development and testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
