@@ -1,391 +1,176 @@
-# 🤖  Chatbot - Multi-Agent AI System
+# AI-Powered Multi-Agent Chatbot System
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![MCP](https://img.shields.io/badge/MCP-Enabled-purple.svg)](https://modelcontextprotocol.io)
+A chatbot that routes each message to a specialised agent, built on the **Model Context Protocol (MCP)**, LangChain, FAISS and Groq.
 
-An intelligent **production-grade multi-agent chatbot system** built with Model Context Protocol (MCP) that enables conversational AI interactions with YouTube videos, documents, web content, and Python code execution. Powered by LangChain, FAISS, and HuggingFace Transformers.
+| Agent | What it does | How |
+|---|---|---|
+| **YouTube** | Summarizes videos and answers questions about them | Transcript via `youtube-transcript-api` (fallback: `yt-dlp` captions) → FAISS index → LLM |
+| **Document** | Q&A, summaries and sentiment for uploaded PDF / DOCX / TXT / MD files | `pypdf` / `python-docx` → FAISS index → LLM |
+| **Web fetch** | Reads a web page and summarizes it or answers questions about it | `requests` + BeautifulSoup, with SSRF protection |
+| **Python** | Runs Python code and returns the output | AST validation + restricted runtime + isolated subprocess with timeout |
+| **General** | Everything else (chat, general questions) | LLM |
 
----
+The **router** picks the agent from clear signals first (a YouTube link, code, a URL, mentions of "the document"). Ambiguous follow-ups ("what about the conclusion?") go to the agent you were just talking to, or to a Groq classifier when a key is set. Each chat session remembers its video, document and page, so follow-up questions work.
 
-##  Features
-
-###  YouTube Video Analysis
-- **Automatic transcript extraction** using yt-dlp
-- **Vector-based semantic search** with FAISS embeddings
-- **Q&A generation** using FLAN-T5 transformer model
-- **Session-based conversation** with context retention
-
-###  Document Q&A
-- **Multi-format support**: PDF, DOCX, TXT
-- **RAG pipeline** for intelligent document querying
-- **Sentiment analysis** and automatic summarization
-- **Document-specific sessions** with history tracking
-
-###  Web Content Fetching
-- **Smart web scraping** with BeautifulSoup
-- **Content extraction** and cleaning
-- **AI-powered summarization** of web pages
-- **URL validation** and safety checks
-
-###  Python Code Execution
-- **Safe sandboxed execution** environment
-- **Code validation** before execution
-- **Expression evaluation** with result formatting
-- **Error handling** and detailed feedback
-
-###  Intelligent Routing
-- **AI-powered intent detection** using GROQ API
-- **Automatic query routing** to specialized agents
-- **Context-aware decision making**
-- **95%+ routing accuracy**
-
-###  Multi-Interface Access
-- **Streamlit Web UI** - Full-featured web interface
-
-- **RESTful API** - Programmatic access to all features
-
----
-
-##  Architecture
-
-### System Design
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      User Interfaces                         │
-│  ┌──────────────────┐                                       │
-│  │  Streamlit App   │                                       │
-│  └────────┬─────────┘                                       │
-└───────────┼──────────────────────────────────────────────────┘
-            │
-            │ HTTP/REST
-            ┌──────────▼──────────┐
-            │   Router MCP Server  │ ◄─── GROQ AI Intent Detection
-            │   (Port 8000)        │
-            └──────────┬──────────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │              │
-   ┌────▼────┐   ┌────▼────┐   ┌────▼────┐   ┌────▼────┐
-   │ YouTube │   │Document │   │ Python  │   │  Fetch  │
-   │   MCP   │   │   MCP   │   │   MCP   │   │   MCP   │
-   │  :8001  │   │  :8002  │   │  :8003  │   │  :8004  │
-   └────┬────┘   └────┬────┘   └────┬────┘   └────┬────┘
-        │             │              │              │
-   ┌────▼────┐   ┌───▼────┐    ┌───▼────┐    ┌───▼────┐
-   │ yt-dlp  │   │ FAISS  │    │Python  │    │BeautifulSoup│
-   │ FLAN-T5 │   │PyPDF2  │    │Sandbox │    │ GROQ   │
-   └─────────┘   └────────┘    └────────┘    └────────┘
+ Web UI (React, served at :8000)   any MCP client (Claude, Cursor, ...)
+        │ REST                         │ MCP (streamable HTTP)
+        ▼                              ▼
+ ┌───────────────────────────────────────────────┐
+ │ Gateway :8000   REST /api/chat /upload /health│
+ │                 MCP  /mcp/                    │
+ │   intent router → orchestrator → sessions     │
+ └───────────────┬───────────────────────────────┘
+                 │ unified mode: in-process calls
+                 │ microservices mode: MCP calls
+     ┌───────────┼─────────────┬──────────────┐
+     ▼           ▼             ▼              ▼
+  YouTube     Document       Python         Fetch
+  :8001/mcp   :8002/mcp      :8003/mcp      :8004/mcp
 ```
 
-### Technology Stack
+The agent logic lives once in `core/agents/`. The same functions are called in-process by the unified server and exposed as MCP tools by the agent servers, so both deployment modes behave identically.
 
-| Category | Technologies |
-|----------|-------------|
-| **AI/ML** | HuggingFace Transformers (FLAN-T5), GROQ API, LangChain |
-| **Vector DB** | FAISS (Facebook AI Similarity Search) |
-| **Backend** | FastMCP, Python 3.8+, Uvicorn |
-| **Frontend** | Streamlit |
-| **NLP** | yt-dlp, BeautifulSoup4, sentence-transformers |
-| **Document Processing** | PyPDF2, python-docx, RecursiveCharacterTextSplitter |
-| **ML Framework** | PyTorch, transformers pipeline |
+## Setup
 
-
-
-## Quick Start
-
-### Prerequisites
-
-Before you begin, ensure you have:
-
-- ✅ **Python 3.8+** installed ([Download](https://www.python.org/downloads/))
-- ✅ **GROQ API Key** ([Get one here](https://console.groq.com/))
-- ✅ **Git** (for cloning the repository)
-
-### Installation
-
-####  Clone the Repository
+Requires **Python 3.11+**, and **Node.js 20+** for the web UI.
 
 ```bash
-git clone https://github.com/yourusername/yt-chatbot.git
-cd yt-chatbot
+python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1      Linux/macOS: source .venv/bin/activate
+
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # CPU-only torch, much smaller
+pip install -r requirements.txt
+
+cp .env.example .env    # then put your key in GROQ_API_KEY
+
+cd frontend && npm install && npm run build && cd ..   # build the web UI once
 ```
 
-####  Set Up Python Environment
+**Groq API key:** get a free key at <https://console.groq.com/keys> and put it in `.env`. The default models are `openai/gpt-oss-120b` for answers and `openai/gpt-oss-20b` for routing and note-taking. You can change them in `.env`, using models listed at <https://console.groq.com/docs/models>. Without a key the system still works, but it falls back to a small local model (`Qwen2.5-0.5B-Instruct`, about 1 GB downloaded on first use). That model is slower and gives noticeably weaker answers.
 
-```powershell
-# Navigate to backend
-cd backend
+The first time an agent indexes something, it also downloads the `all-MiniLM-L6-v2` embedding model (about 90 MB).
 
-# Create virtual environment (optional but recommended)
-python -m venv venv
+## Running
 
-# Activate virtual environment
-# Windows PowerShell:
-.\venv\Scripts\Activate.ps1
-# Windows CMD:
-.\venv\Scripts\activate.bat
-# Linux/Mac:
-source venv/bin/activate
+**Unified mode** (one process, recommended):
 
-# Install dependencies
-pip install -r requirements_mcp.txt
+```bash
+python scripts/start_unified_server.py
 ```
 
-####  Configure Environment Variables
+**Microservices mode** (four agent MCP servers plus the router):
 
-```powershell
-# Windows PowerShell
-$env:GROQ_API_KEY="your_groq_api_key_here"
-
-# Windows CMD
-set GROQ_API_KEY=your_groq_api_key_here
-
-# Linux/Mac
-export GROQ_API_KEY="your_groq_api_key_here
-   $env:GROQ_API_KEY="your_groq_api_key_here"
-   ```
-
-** Pro Tip:** Create a `.env` file in the backend directory:
-```env
-GROQ_API_KEY=your_groq_api_key_here
+```bash
+python scripts/start_servers.py
 ```
 
----
+Then open **http://localhost:8000**. The gateway serves the built web UI from `frontend/dist`.
 
-##  Running the System
+While working on the UI, add `--web` to also start the Vite dev server with hot reload on **http://localhost:5173** (it proxies `/api` to the gateway). The old Streamlit UI still starts with `--ui` until it is removed.
 
-### Option 1: Microservices Architecture (Recommended)
+| URL | What |
+|---|---|
+| http://localhost:8000 | Chat UI (after `npm run build`) |
+| http://localhost:5173 | Chat UI dev server (`--web`) |
+| http://localhost:8000/docs | REST API (Swagger) |
+| http://localhost:8000/mcp/ | MCP endpoint (gateway) |
+| http://localhost:800[1-4]/mcp | Agent MCP servers (microservices mode) |
 
-Start all 5 MCP servers independently for maximum scalability:
-
-```powershell
-cd backend/scripts
-python start_mcp_servers.py
-```
-
-**Servers started:**
--  Router MCP Server → `http://localhost:8000`
--  YouTube MCP Server → `http://localhost:8001`
--  Document MCP Server → `http://localhost:8002`
--  Python MCP Server → `http://localhost:8003`
--  Fetch MCP Server → `http://localhost:8004`
-
-### Option 2: Unified Server (Simpler Deployment)
-
-Start a single server with all functionality combined:
-
-```powershell
-cd backend/scripts
-python start_unified_server.py
-```
-
-**Server started:**
--  Unified MCP Server → `http://localhost:8000`
-
-### Launch Web Interface
-
-Open the Streamlit web application:
-
-```powershell
-cd backend/ui
-streamlit run streamlit_app.py
-```
-
-Access at: `http://localhost:8501`
-
----
-
-##  Usage Examples
-
-###  YouTube Video Q&A
-
-**Via Streamlit:**
-```
-Query: "Summarize this YouTube video: https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-Response: [AI generates video summary with key points]
-
-Query: "What are the main topics discussed?"
-Response: [AI answers based on video transcript]
-```
-
-
-###  Document Analysis
-
-**Upload Document:**
-```
-1. Upload PDF/DOCX/TXT file via Streamlit
-2. Ask: "What is the summary?"
-3. Ask: "What is the sentiment?"
-4. Ask: "Extract key findings about [topic]"
-```
-
-###  Web Content Fetching
+## Usage examples
 
 ```
-Query: "Fetch and summarize https://example.com/article"
-Response: [AI fetches content and provides summary]
+Summarize https://www.youtube.com/watch?v=aircAruvnKk
+  → What does he say about gradient descent?
+
+Fetch and summarize https://en.wikipedia.org/wiki/Model_Context_Protocol
+  → Who created it?
+
+(drop report.pdf on the sidebar, or use the paperclip)
+  → What is the summary?   /   What is the sentiment?   /   What does it say about pricing?
+
+Execute this Python code:
+import math
+print([math.factorial(n) for n in range(8)])
 ```
 
-###  Python Code Execution
+## REST API
 
-```
-Query: "Execute this Python code:
-num1 = 10
-num2 = 20
-result = num1 + num2
-print(f'Sum: {result}')"
+Routes live under `/api` (the same routes at the root still work for older clients).
 
-Response: Sum: 30
-```
+```bash
+curl -X POST localhost:8000/api/chat -H "Content-Type: application/json" \
+     -d '{"session_id": "demo", "query": "run this code: print(2**10)"}'
 
----
+curl -X POST localhost:8000/api/upload -F session_id=demo -F file=@report.pdf
 
-##  Testing
-
-### Health Check
-
-Test if all servers are running:
-
-```python
-import requests
-
-# Check router
-response = requests.get("http://localhost:8000/health")
-print(response.json())
+curl localhost:8000/api/health
+curl localhost:8000/api/sessions/demo           # loaded context + history
+curl -X DELETE localhost:8000/api/sessions/demo
 ```
 
-### API Testing
+Set `CORS_ORIGINS` (comma-separated) if a browser app on another origin calls the API; it defaults to the Vite dev server.
 
-```python
-import requests
+## Using it from an MCP client
 
-# Test YouTube processing
-response = requests.post(
-    "http://localhost:8001/process_video",
-    json={"video_url": "https://www.youtube.com/watch?v=VIDEO_ID"}
-)
-print(response.json())
+`config/mcp_config.json` points a client at the gateway, which exposes these tools: `chat`, `route`, `upload_document`, `session_info`, `clear_session` and `health`. In unified mode it also exposes every agent tool directly, such as `python_query` and `youtube_query`. `config/mcp_config_agents.json` connects straight to the four agent servers instead (microservices mode only).
+
+## Python sandbox
+
+Code runs in a separate `python -I` process. The process gets a throwaway working directory, no environment secrets, and a 10-second timeout (`PYTHON_TIMEOUT`). Before the code runs, it is checked for:
+
+- **Imports:** only safe standard-library modules are allowed (`math`, `statistics`, `random`, `collections`, `itertools`, `json`, `re`, `datetime`, ...).
+- **Blocked builtins:** `open`, `eval`, `exec`, `__import__`, `input`, `globals` and similar are unavailable.
+- **Attribute access:** dunder and private attributes are blocked, except `self._x` inside classes.
+
+Imported modules are also wrapped so their private internals and unsafe submodules can't be reached. File, network and OS access are not available, and `input()` is not supported.
+
+Memory is capped (1 GB) only on Linux/macOS. On Windows, the timeout is the only limit on a runaway process.
+
+## Configuration
+
+All settings are environment variables, optionally set in `.env`. See `.env.example` for the full list: models, ports, upload and fetch size limits, the sandbox timeout, and `ALLOW_PRIVATE_URLS`, which lets the fetch agent read intranet or localhost pages.
+
+## Tests
+
+```bash
+pytest                                  # backend
+cd frontend && npm test                 # web UI unit + component tests
+cd frontend && npm run test:e2e         # web UI against a real gateway (build first)
 ```
 
----
+The web UI's end-to-end tests run at desktop and phone sizes and include an axe accessibility check in light and dark themes. The backend tests cover routing, URL and video-ID parsing, file loaders, SSRF blocking, the sandbox (including escape attempts), and the gateway end-to-end with the LLM stubbed out.
 
-##  Configuration
+## Limitations
 
-### MCP Server Configuration
+- **State is in memory.** Sessions, uploaded documents and video indexes are lost when the server restarts.
+- **YouTube may block transcripts.** YouTube sometimes rate-limits or blocks transcript requests from cloud or datacenter IPs. The agent reports this clearly when it happens. Videos without captions can't be processed.
+- **Very long sources are sampled.** For summaries of very long sources, up to 4 evenly spaced parts are summarized and then combined; with the local model, up to 3.
+- **Groq's free tier is rate-limited.** It limits tokens per minute, so summarizing several long pages or videos back to back can pause for 10–30 seconds while requests are retried automatically. A paid Groq tier removes this.
+- **Some pages can't be read.** Pages that need JavaScript to render, or that require a login, can't be fetched.
 
-Edit `backend/config/mcp_config.json`:
+## Project layout
 
-```json
-{
-  "mcpServers": {
-    "agent-router": {
-      "type": "http",
-      "url": "http://localhost:8000"
-    },
-    "youtube-mcp": {
-      "type": "http",
-      "url": "http://localhost:8001"
-    }
-    // ... more servers
-  }
-}
 ```
-
-### Streamlit Configuration
-
-Edit `backend/ui/streamlit_app.py`:
-
-```python
-ROUTER_BASE_URL = "http://localhost:9000"  # Change port if needed
-DOCUMENT_BOT_URL = "http://localhost:8002"
+core/
+  config.py          settings (.env)
+  llm.py             Groq / local model
+  rag.py             chunking, FAISS, grounded answers, summaries
+  intent.py          routing rules + LLM classifier
+  orchestrator.py    routes, dispatches (local or MCP), updates sessions
+  sessions.py        conversation state
+  mcp_client.py      MCP client for microservices mode
+  loaders.py         PDF/DOCX/TXT/HTML text extraction
+  agents/            youtube, document, fetch, python_exec (+ sandbox_runner), general
+servers/
+  gateway.py         FastAPI REST + MCP endpoint
+  unified.py         gateway with in-process agents
+  router.py          gateway calling agent servers over MCP
+  youtube.py document.py python.py fetch.py   agent MCP servers
+scripts/             launchers
+frontend/            web UI (React + Vite); see frontend/README.md
+ui/streamlit_app.py  legacy chat UI, to be removed
+tests/
 ```
-
----
-
-##  Performance & Scalability
-
-| Metric | Value |
-|--------|-------|
-| **Concurrent Requests** | 100+ simultaneous connections |
-| **Video Processing Time** | 2-5 seconds (depending on length) |
-| **Document Chunk Size** | 1000 characters (configurable) |
-| **Vector Search Accuracy** | 95%+ semantic similarity |
-| **Intent Detection Accuracy** | 95%+ correct routing |
-| **Supported File Formats** | PDF, DOCX, TXT |
-| **Max Document Size** | 50MB (configurable) |
-
----
-
-##  Troubleshooting
-
-### Common Issues
-
-**1. Server won't start**
-```powershell
-# Check if port is already in use
-netstat -ano | findstr :8000
-
-# Kill process if needed
-taskkill /PID <PID> /F
-```
-
-**2. GROQ API Key Error**
-```powershell
-# Verify environment variable is set
-echo $env:GROQ_API_KEY
-
-# Re-set if needed
-$env:GROQ_API_KEY="your_key_here"
-```
-
-**3. Import Errors**
-```powershell
-# Reinstall dependencies
-pip install -r requirements_mcp.txt --force-reinstall
-```
-
----
-
-##  Documentation
-
-| Document | Description |
-|----------|-------------|
-| [README_MCP.md](backend/docs/README_MCP.md) | Microservices architecture details |
-| [README_UNIFIED.md](backend/docs/README_UNIFIED.md) | Unified server guide |
-| [CURRENT_STATE.md](backend/docs/CURRENT_STATE.md) | System state and migration log |
-| [Servers README](backend/servers/README.md) | Server-specific documentation |
-| [Core README](backend/core/README.md) | Core utilities documentation |
-
----
-
-##  Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-##  License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-
-##  Acknowledgments
-
-- [HuggingFace](https://huggingface.co/) for Transformers
-- [LangChain](https://langchain.com/) for RAG framework
-- [GROQ](https://groq.com/) for AI API
-- [Streamlit](https://streamlit.io/) for web framework
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube extraction
-
-
-

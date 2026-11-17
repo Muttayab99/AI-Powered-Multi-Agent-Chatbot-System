@@ -47,9 +47,8 @@ Thumbs.db
 desktop.ini
 
 # Project specific
-backend/uploads/*
-!backend/uploads/.gitkeep
-backend/__pycache__/
+uploads/
+.pytest_cache/
 *.log
 
 # Jupyter Notebook

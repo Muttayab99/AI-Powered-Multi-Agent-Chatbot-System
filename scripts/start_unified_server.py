@@ -1,79 +1,51 @@
 #!/usr/bin/env python3
-"""
-Startup script for the unified MCP server.
-This script launches a single server that combines all functionality.
-"""
+"""Unified mode: one process serving the REST API, the MCP endpoint and all agents.
 
-import os
+    python scripts/start_unified_server.py          # server on 8000
+    python scripts/start_unified_server.py --web    # also start the React web UI on 5173 (after npm run build, :8000 serves it too)
+    python scripts/start_unified_server.py --ui     # also start the legacy Streamlit UI on 8501
+"""
+import argparse
 import sys
-import subprocess
-import signal
-import time
+from pathlib import Path
 
-def start_unified_server():
-    """Start the unified MCP server"""
-    print("Starting Unified MCP Server...")
-    
-    # Set environment variables
-    env = os.environ.copy()
-    env['PORT'] = '8000'
-    
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core import config  # noqa: E402
+from scripts._process import ProcessGroup, port_in_use, start_web_dev  # noqa: E402
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--ui", action="store_true", help="also start the Streamlit UI (legacy)")
+    parser.add_argument("--web", action="store_true", help="also start the React web UI dev server on 5173")
+    args = parser.parse_args()
+
+    if port_in_use(config.GATEWAY_PORT):
+        print(f"Port {config.GATEWAY_PORT} is already in use. Stop whatever is using it first.")
+        return 1
+    if not config.GROQ_API_KEY:
+        print("Note: GROQ_API_KEY is not set - using the local fallback model (slower, lower quality).")
+
+    group = ProcessGroup()
     try:
-        # Start the unified server
-        unified_script = os.path.join(os.path.dirname(__file__), '..', 'servers', 'unified_mcp.py')
-        process = subprocess.Popen(
-            [sys.executable, unified_script],
-            env=env,
-            cwd=os.path.dirname(os.path.abspath(__file__))
-        )
-        
-        print(f"Unified MCP server started with PID: {process.pid}")
-        print("Server is running at: http://localhost:8000")
-        print("MCP configuration: backend/mcp_config_unified.json")
-        print("\nAvailable tools:")
-        print("- YouTube: process_video, chat_with_video, query_video, list_videos")
-        print("- Documents: upload_document, ask_question, summarize, sentiment")
-        print("- Python: execute_python, validate_code")
-        print("- Web: fetch_url, fetchandSummarize, extract_url")
-        print("- Session: route, session_info, list_sessions, clear_session")
-        print("- Health: health, list_all_tools")
-        
-        return process
-        
-    except Exception as e:
-        print(f"Error starting unified server: {e}")
-        return None
+        group.start("server", [sys.executable, "-m", "servers.unified"])
+        if not group.wait_for_port("server", config.GATEWAY_PORT):
+            return 1
+        print(f"OK unified server: http://localhost:{config.GATEWAY_PORT}  (REST docs /docs, MCP /mcp/)")
+        if args.web and not start_web_dev(group):
+            return 1
+        if args.ui:
+            group.start("ui", [sys.executable, "-m", "streamlit", "run", "ui/streamlit_app.py",
+                               "--server.headless", "true"])
+            if group.wait_for_port("ui", 8501, timeout=60):
+                print("OK UI: http://localhost:8501")
+        print("Running. Press Ctrl+C to stop.")
+        group.wait()
+    finally:
+        group.stop()
+    return 0
 
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    print("\nShutting down unified MCP server...")
-    sys.exit(0)
-
-def main():
-    """Main function"""
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    print("=" * 60)
-    print("UNIFIED MCP SERVER STARTUP")
-    print("=" * 60)
-    
-    # Start the server
-    process = start_unified_server()
-    
-    if process:
-        try:
-            # Wait for the process to complete
-            process.wait()
-        except KeyboardInterrupt:
-            print("\nReceived interrupt signal, shutting down...")
-            process.terminate()
-            process.wait()
-            print("Unified MCP server stopped.")
-    else:
-        print("Failed to start unified MCP server.")
-        sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

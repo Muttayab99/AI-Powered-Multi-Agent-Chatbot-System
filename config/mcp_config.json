@@ -1,29 +1,8 @@
 {
   "mcpServers": {
-    "agent-router": {
+    "multi-agent-chatbot": {
       "type": "http",
-      "url": "http://localhost:8000",
-      "headers": {
-        "Authorization": "Bearer ${MCP_TOKEN}"
-      }
-    },
-    "youtube-mcp": {
-      "type": "http",
-      "url": "http://localhost:8001"
-    },
-    "document-mcp": {
-      "type": "http",
-      "url": "http://localhost:8002"
-    },
-    "python-mcp": {
-      "type": "http",
-      "url": "http://localhost:8003"
-    },
-    "fetch-mcp": {
-      "type": "http",
-      "url": "http://localhost:8004"
+      "url": "http://localhost:8000/mcp/"
     }
-  },
-  "description": "MCP configuration for the YouTube Chatbot system (FastMCP/Cloud-ready)",
-  "version": "2.0.0"
+  }
 }
